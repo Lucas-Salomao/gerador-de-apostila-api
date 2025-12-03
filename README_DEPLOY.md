@@ -33,19 +33,29 @@ Este guia explica como implantar a API "Gerador de Apostila" no Google Cloud Run
 4.  **Acessar a API**:
     Ao final do deploy, o script exibirá a URL do serviço (Service URL). Você pode acessar essa URL no navegador para ver a mensagem de boas-vindas ou adicionar `/docs` para ver a documentação Swagger.
 
-## Variáveis de Ambiente
+## Gerenciando Variáveis de Ambiente
 
-Se sua aplicação precisar de variáveis de ambiente (como chaves de API), você pode configurá-las durante o deploy ou no console do Cloud Run.
+Você pode adicionar variáveis de ambiente (como `GOOGLE_API_KEY`) de duas formas:
 
-Para configurar via linha de comando durante o deploy, adicione a flag `--set-env-vars` no comando `gcloud run deploy` dentro do arquivo `deploy.ps1`. Exemplo:
+### Opção 1: Via Google Cloud Console (Interface Web)
+1.  Acesse o [Google Cloud Console](https://console.cloud.google.com/run).
+2.  Clique no serviço **gerador-de-apostila-api**.
+3.  Clique em **EDITAR E IMPLEMENTAR NOVA REVISÃO** (Edit & Deploy New Revision) no topo.
+4.  Vá na aba **Contêiner** (Container).
+5.  Role até a seção **Variáveis de ambiente** (Environment variables).
+6.  Clique em **ADICIONAR VARIÁVEL** (Add Variable).
+    *   **Nome**: `GOOGLE_API_KEY`
+    *   **Valor**: Sua chave da API.
+7.  Clique em **IMPLANTAR** (Deploy) no final da página.
+
+### Opção 2: Via Linha de Comando (gcloud)
+Você pode atualizar as variáveis de um serviço já implantado com o comando:
 
 ```powershell
-gcloud run deploy $SERVICE_NAME `
-    --source . `
-    --region $REGION `
-    --allow-unauthenticated `
-    --port 8080 `
-    --set-env-vars "GOOGLE_API_KEY=sua_chave,OUTRA_VAR=valor"
+gcloud run services update gerador-de-apostila-api `
+    --update-env-vars "GOOGLE_API_KEY=sua_chave_aqui" `
+    --region us-east1
 ```
 
-Ou configure pelo Console do Google Cloud após o deploy.
+Para adicionar múltiplas variáveis, separe por vírgula:
+`--update-env-vars "VAR1=valor1,VAR2=valor2"`

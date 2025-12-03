@@ -8,3 +8,6 @@ __pycache__
 *.pyd
 .DS_Store
 book_generation.log
+*.txt
+*.docx
+*.github
