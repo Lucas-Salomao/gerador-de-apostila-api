@@ -1,4 +1,4 @@
-FROM python:3.13-slim-trixie
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
@@ -10,8 +10,13 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Cloud Run sets the PORT environment variable.
+# We default to 8080 if not set, but Cloud Run will inject it.
+ENV PORT=8080
 
-HEALTHCHECK CMD curl --fail http://localhost:8000/ || exit 1
+EXPOSE ${PORT}
 
-CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK CMD curl --fail http://localhost:${PORT}/ || exit 1
+
+# Use shell form to expand environment variable
+CMD sh -c "uvicorn api.app:app --host 0.0.0.0 --port ${PORT}"
