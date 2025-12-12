@@ -10,6 +10,7 @@ from api.models import BookRequest, ProgressUpdate, ApostilaResponse, ApostilasL
 from api.database import get_db, init_db
 from api.db_models import Apostila
 from api.storage import upload_to_gcs, generate_signed_url
+from api.auth_middleware import get_current_user, AuthenticatedUser
 
 from api.agent import agent_book_generator
 
@@ -49,6 +50,14 @@ async def startup_event():
 async def root():
     return {"message": "Book Generator API is running. Go to /docs for Swagger UI."}
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint (público).
+    Usado para monitoramento e load balancers.
+    """
+    return {"status": "healthy", "service": "gerador-de-apostila-api"}
+
 @app.get("/download/{filename}")
 async def download_file(filename: str):
     """
@@ -76,7 +85,11 @@ async def download_file(filename: str):
 # ===== NOVOS ENDPOINTS PARA HISTÓRICO DE APOSTILAS =====
 
 @app.get("/apostilas/{user_id}", response_model=ApostilasListResponse)
-async def list_apostilas(user_id: str, db: Session = Depends(get_db)):
+async def list_apostilas(
+    user_id: str, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Lista todas as apostilas de um usuário.
     """
@@ -102,7 +115,12 @@ async def list_apostilas(user_id: str, db: Session = Depends(get_db)):
     return ApostilasListResponse(apostilas=response_list, total=len(response_list))
 
 @app.get("/apostilas/{user_id}/{apostila_id}/download")
-async def download_apostila(user_id: str, apostila_id: str, db: Session = Depends(get_db)):
+async def download_apostila(
+    user_id: str, 
+    apostila_id: str, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Gera URL assinada para download de uma apostila do GCS.
     """
@@ -124,7 +142,12 @@ async def download_apostila(user_id: str, apostila_id: str, db: Session = Depend
         raise HTTPException(status_code=500, detail="Erro ao gerar link de download")
 
 @app.get("/apostilas/{user_id}/{apostila_id}/preview")
-async def preview_apostila(user_id: str, apostila_id: str, db: Session = Depends(get_db)):
+async def preview_apostila(
+    user_id: str, 
+    apostila_id: str, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Retorna o arquivo DOCX diretamente para preview no navegador.
     Este endpoint baixa do GCS e retorna como StreamingResponse.
@@ -162,12 +185,15 @@ async def preview_apostila(user_id: str, apostila_id: str, db: Session = Depends
 # ===== ENDPOINT DE GERAÇÃO COM PERSISTÊNCIA =====
 
 @app.post("/generate-book")
-async def generate_book(request: BookRequest):
+async def generate_book(
+    request: BookRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Inicia a geração do livro e retorna um stream de eventos (SSE).
     Ao final, faz upload para GCS e salva no banco de dados.
     """
-    logger.info(f"Recebida solicitação de geração de livro: {request.theme}")
+    logger.info(f"Recebida solicitação de geração de livro: {request.theme} (user: {current_user.sub})")
     
     # Variáveis para capturar o resultado final
     final_export_path = None

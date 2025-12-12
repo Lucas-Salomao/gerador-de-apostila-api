@@ -9,3 +9,5 @@ fastapi
 uvicorn
 psycopg2-binary
 sqlalchemy
+httpx
+python-jose[cryptography]
