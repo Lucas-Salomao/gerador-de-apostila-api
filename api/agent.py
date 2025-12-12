@@ -13,11 +13,15 @@ from langgraph.checkpoint.memory import MemorySaver
 import langchain
 
 # Bibliotecas para Gemini/Vertex AI
-# from google.cloud import aiplatform
-# from vertexai.generative_models import GenerativeModel, Part
-# import vertexai
+# Import condicional para suportar ambos os backends
+USE_VERTEXAI = os.getenv("USE_VERTEXAI", "false").lower() == "true"
 
-import google.generativeai as genai
+if USE_VERTEXAI:
+    from google.cloud import aiplatform
+    from vertexai.generative_models import GenerativeModel
+    import vertexai
+else:
+    import google.generativeai as genai
 
 # Biblioteca para exportação
 import docx
@@ -40,25 +44,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Inicializar Gemini API
-def init_gemin_api():
+def init_gemini_api():
     """Inicializa a conexão com o Gemini API."""
     logger.info("Inicializando Gemini API...")
+    import google.generativeai as genai
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-    return genai.GenerativeModel('gemini-2.5-flash')
+    return genai.GenerativeModel(os.getenv("GEMINI_MODEL"))
 
-# def init_vertex_ai():
-#     """Inicializa a conexão com o Vertex AI usando credenciais do ambiente."""
-#     logger.info("Inicializando Vertex AI...")
-#     project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-#     if not project_id:
-#         raise ValueError("A variável de ambiente GOOGLE_CLOUD_PROJECT não foi definida.")
+def init_vertex_ai():
+    """Inicializa a conexão com o Vertex AI usando credenciais do ambiente."""
+    logger.info("Inicializando Vertex AI...")
+    from google.cloud import aiplatform
+    from vertexai.generative_models import GenerativeModel
+    import vertexai
     
-#     vertexai.init(project=project_id)
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+    location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
     
-#     # IMPORTANTE: O nome do modelo no Vertex AI pode ser um pouco diferente.
-#     # Verifique na documentação do Vertex AI o identificador correto para o modelo que deseja.
-#     # "gemini-1.5-flash-001" é um exemplo comum e robusto.
-#     return GenerativeModel("gemini-2.0-flash")
+    if not project_id:
+        raise ValueError("A variável de ambiente GOOGLE_CLOUD_PROJECT não foi definida.")
+    
+    vertexai.init(project=project_id, location=location)
+    
+    # Modelo no Vertex AI
+    return GenerativeModel(os.getenv("GEMINI_MODEL"))
+
+def get_model():
+    """Retorna o modelo correto baseado na variável USE_VERTEXAI."""
+    if USE_VERTEXAI:
+        logger.info("Usando Vertex AI como backend")
+        return init_vertex_ai()
+    else:
+        logger.info("Usando Gemini API como backend")
+        return init_gemini_api()
 
 # Função auxiliar para parsing seguro de JSON
 def safe_json_parse(response_text: str, fallback: Any) -> Any:
@@ -620,8 +638,7 @@ def agent_book_generator(area_tecnologica: str = "", custom_audience: str = "", 
     """Executa o agente de geração de livros e emite atualizações de progresso."""
     logger.info("Iniciando processo de geração de livro...")
     try:
-        # model = init_vertex_ai()
-        model = init_gemin_api()
+        model = get_model()
         book_agent = create_book_agent(model)
 
         initial_state = BookState(status="start")
