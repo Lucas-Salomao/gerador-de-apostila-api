@@ -96,7 +96,7 @@ async def list_apostilas(user_id: str, db: Session = Depends(get_db)):
             num_chapters=a.num_chapters,
             gcs_url=a.gcs_url,
             file_size_bytes=a.file_size_bytes,
-            created_at=a.created_at.isoformat() if a.created_at else ""
+            created_at=a.created_at.isoformat() + "Z" if a.created_at else ""
         ))
     
     return ApostilasListResponse(apostilas=response_list, total=len(response_list))
@@ -177,12 +177,21 @@ async def generate_book(request: BookRequest):
                             download_url = f"/download/{filename}"  # Fallback local
                             apostila_id = None
                             
+                            # DEBUG: Log das condições
+                            logger.info(f"DEBUG - user_id: '{request.user_id}'")
+                            logger.info(f"DEBUG - export_path: '{export_path}'")
+                            logger.info(f"DEBUG - file exists: {os.path.exists(export_path) if export_path else False}")
+                            
                             if request.user_id and export_path and os.path.exists(export_path):
+                                logger.info("DEBUG - Condições atendidas, tentando salvar...")
                                 try:
                                     # Upload para GCS
+                                    logger.info(f"DEBUG - Fazendo upload para GCS: {filename}")
                                     gcs_url, blob_name, file_size = upload_to_gcs(export_path, filename)
+                                    logger.info(f"DEBUG - Upload concluído: {gcs_url}")
                                     
                                     # Salvar no banco de dados
+                                    logger.info("DEBUG - Salvando no banco de dados...")
                                     db = next(get_db())
                                     try:
                                         apostila = Apostila(
@@ -209,7 +218,11 @@ async def generate_book(request: BookRequest):
                                         
                                 except Exception as e:
                                     logger.error(f"Erro ao salvar apostila: {e}")
+                                    import traceback
+                                    logger.error(traceback.format_exc())
                                     # Continua com download local
+                            else:
+                                logger.warning(f"DEBUG - Condições NÃO atendidas para salvar. user_id={bool(request.user_id)}, export_path={bool(export_path)}, exists={os.path.exists(export_path) if export_path else False}")
                             
                             final_state["download_url"] = download_url
                             if apostila_id:

@@ -736,8 +736,20 @@ def agent_book_generator(area_tecnologica: str = "", custom_audience: str = "", 
                     if chapter_info and chapter_info.get("content"):
                         yield chapter_info["content"]
 
-        final_state = book_agent.checkpointer.get(config)
+        checkpoint = book_agent.checkpointer.get(config)
         logger.info("Processo de geração de livro concluído!")
+        
+        # Extrair o estado correto do checkpoint
+        # O checkpointer retorna um objeto com 'channel_values' contendo o estado
+        if checkpoint and hasattr(checkpoint, 'channel_values'):
+            final_state = dict(checkpoint.channel_values)
+        elif isinstance(checkpoint, dict):
+            final_state = checkpoint.get('channel_values', checkpoint)
+        else:
+            final_state = {}
+        
+        logger.info(f"DEBUG - final_state keys: {final_state.keys() if isinstance(final_state, dict) else 'not a dict'}")
+        logger.info(f"DEBUG - export_path in final_state: {final_state.get('export_path', 'NOT FOUND')}")
 
         yield {"final_state": final_state}
 
