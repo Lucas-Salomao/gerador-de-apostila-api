@@ -1,5 +1,6 @@
 """
 Configuração de conexão com o banco de dados PostgreSQL.
+Compatível com Supabase (pooler) e AlloyDB.
 """
 import os
 from sqlalchemy import create_engine
@@ -15,12 +16,20 @@ logger = logging.getLogger(__name__)
 # Variáveis de ambiente para conexão
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "apostilas")
+DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_SSLMODE = os.getenv("DB_SSLMODE", "")  # "require" para Supabase, vazio para local
 
 # Construir a URL de conexão
+# Formato: postgresql://user:password@host:port/database?sslmode=require
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Adicionar SSL se configurado (necessário para Supabase pooler)
+if DB_SSLMODE:
+    DATABASE_URL += f"?sslmode={DB_SSLMODE}"
+
+logger.info(f"Conectando ao banco de dados em {DB_HOST}:{DB_PORT}/{DB_NAME}")
 
 # Criar engine com pool de conexões
 engine = create_engine(
