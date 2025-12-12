@@ -1,4 +1,5 @@
 google-generativeai
+google-cloud-storage
 python-dotenv
 python-docx
 langgraph
@@ -6,3 +7,5 @@ langchain
 langgraph-checkpoint
 fastapi
 uvicorn
+psycopg2-binary
+sqlalchemy
