@@ -41,9 +41,28 @@ async def download_file(filename: str):
     """
     Faz o download do arquivo gerado.
     """
-    file_path = os.path.join(os.getcwd(), filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path, filename=filename, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    # Sanitiza o filename para prevenir Path Traversal
+    # Remove qualquer componente de caminho (../, /, \, etc.)
+    safe_filename = os.path.basename(filename)
+    
+    # Verifica se o filename é válido após sanitização
+    if not safe_filename or safe_filename != filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # Define o diretório base permitido para downloads
+    base_dir = os.getcwd()
+    file_path = os.path.join(base_dir, safe_filename)
+    
+    # Verifica se o caminho resultante está dentro do diretório permitido
+    # Isso previne ataques mesmo que o basename falhe
+    real_file_path = os.path.realpath(file_path)
+    real_base_dir = os.path.realpath(base_dir)
+    
+    if not real_file_path.startswith(real_base_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if os.path.exists(real_file_path) and os.path.isfile(real_file_path):
+        return FileResponse(real_file_path, filename=safe_filename, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     raise HTTPException(status_code=404, detail="File not found")
 
 @app.post("/generate-book")
