@@ -119,3 +119,30 @@ def delete_from_gcs(blob_name: str) -> bool:
     except Exception as e:
         logger.error(f"Erro ao deletar {blob_name}: {e}")
         return False
+
+
+def download_from_gcs(blob_name: str) -> bytes:
+    """
+    Baixa um arquivo do Google Cloud Storage e retorna como bytes.
+    
+    Args:
+        blob_name: Nome do blob no GCS
+    
+    Returns:
+        Conteúdo do arquivo como bytes
+    """
+    if not GCS_BUCKET_NAME:
+        raise ValueError("GCS_BUCKET_NAME não configurado nas variáveis de ambiente")
+    
+    logger.info(f"Baixando arquivo {blob_name} do GCS")
+    
+    client = get_storage_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob = bucket.blob(blob_name)
+    
+    content = blob.download_as_bytes()
+    
+    logger.info(f"Arquivo {blob_name} baixado ({len(content)} bytes)")
+    
+    return content
+

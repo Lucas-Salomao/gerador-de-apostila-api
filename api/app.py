@@ -123,6 +123,42 @@ async def download_apostila(user_id: str, apostila_id: str, db: Session = Depend
         logger.error(f"Erro ao gerar URL assinada: {e}")
         raise HTTPException(status_code=500, detail="Erro ao gerar link de download")
 
+@app.get("/apostilas/{user_id}/{apostila_id}/preview")
+async def preview_apostila(user_id: str, apostila_id: str, db: Session = Depends(get_db)):
+    """
+    Retorna o arquivo DOCX diretamente para preview no navegador.
+    Este endpoint baixa do GCS e retorna como StreamingResponse.
+    """
+    from api.storage import download_from_gcs
+    import io
+    
+    logger.info(f"Gerando preview para apostila {apostila_id}")
+    
+    apostila = db.query(Apostila).filter(
+        Apostila.id == apostila_id,
+        Apostila.user_id == user_id
+    ).first()
+    
+    if not apostila:
+        raise HTTPException(status_code=404, detail="Apostila não encontrada")
+    
+    try:
+        # Baixar do GCS
+        file_bytes = download_from_gcs(apostila.gcs_blob_name)
+        
+        # Retornar como StreamingResponse
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'inline; filename="{apostila.title}.docx"',
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao fazer preview: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao carregar documento")
+
 # ===== ENDPOINT DE GERAÇÃO COM PERSISTÊNCIA =====
 
 @app.post("/generate-book")
