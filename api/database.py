@@ -65,7 +65,8 @@ def init_db():
     Inicializa o banco de dados criando todas as tabelas.
     Deve ser chamado na inicialização da aplicação.
     """
-    from api.db_models import Apostila  # Import dos modelos
+    from api.db_models import Apostila, GenerationJob  # Import dos modelos
     logger.info("Inicializando banco de dados...")
     Base.metadata.create_all(bind=engine)
     logger.info("Tabelas criadas com sucesso.")
+

@@ -7,11 +7,15 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from api.models import BookRequest, ProgressUpdate, ApostilaResponse, ApostilasListResponse
+from api.models import (
+    BookRequest, ProgressUpdate, ApostilaResponse, ApostilasListResponse,
+    CreateJobRequest, CreateJobResponse, JobStatusResponse
+)
 from api.database import get_db, init_db
-from api.db_models import Apostila
+from api.db_models import Apostila, GenerationJob
 from api.storage import upload_to_gcs, generate_signed_url
 from api.auth_middleware import get_current_user, AuthenticatedUser
+from api.worker import start_generation_job
 
 from api.agent import agent_book_generator
 
@@ -347,3 +351,106 @@ async def generate_book(
         }
     )
 
+
+# ===== ENDPOINTS DE JOBS (POLLING) =====
+
+@app.post("/jobs/generate", response_model=CreateJobResponse)
+async def create_generation_job(
+    request: CreateJobRequest,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Cria um novo job de geração de apostila.
+    Retorna job_id para polling de status.
+    """
+    logger.info(f"Criando job de geração: {request.theme} (user: {current_user.sub})")
+    
+    # Criar job no banco
+    job = GenerationJob(
+        user_id=current_user.sub,
+        theme=request.theme,
+        area_tecnologica=request.area_tecnologica,
+        target_audience=request.target_audience,
+        num_chapters=request.num_chapters,
+        status="pending",
+        progress=0,
+        current_step="Aguardando início..."
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    
+    job_id = str(job.id)
+    logger.info(f"Job criado: {job_id}")
+    
+    # Iniciar worker em background
+    start_generation_job(job_id)
+    
+    return CreateJobResponse(
+        job_id=job_id,
+        status="pending",
+        message="Job de geração criado. Use GET /jobs/{job_id}/status para acompanhar."
+    )
+
+
+@app.get("/jobs/{job_id}/status", response_model=JobStatusResponse)
+async def get_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Retorna o status atual de um job de geração.
+    Use este endpoint para polling (recomendado: a cada 20 segundos).
+    """
+    # Validar job_id como UUID
+    try:
+        uuid_lib.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de job inválido")
+    
+    job = db.query(GenerationJob).filter(
+        GenerationJob.id == job_id,
+        GenerationJob.user_id == current_user.sub
+    ).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    
+    return JobStatusResponse(
+        id=str(job.id),
+        status=job.status,
+        progress=job.progress or 0,
+        current_step=job.current_step,
+        content=job.content,
+        apostila_id=str(job.apostila_id) if job.apostila_id else None,
+        download_url=job.download_url,
+        error_message=job.error_message,
+        theme=job.theme,
+        area_tecnologica=job.area_tecnologica,
+        target_audience=job.target_audience,
+        num_chapters=job.num_chapters,
+        created_at=job.created_at.isoformat() + "Z" if job.created_at else "",
+        updated_at=job.updated_at.isoformat() + "Z" if job.updated_at else ""
+    )
+
+
+@app.get("/jobs/user/active")
+async def get_user_active_jobs(
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Retorna jobs ativos do usuário (pending ou processing).
+    Útil para reconexão após fechar o navegador.
+    """
+    jobs = db.query(GenerationJob).filter(
+        GenerationJob.user_id == current_user.sub,
+        GenerationJob.status.in_(["pending", "processing"])
+    ).order_by(GenerationJob.created_at.desc()).all()
+    
+    return {
+        "jobs": [job.to_dict() for job in jobs],
+        "total": len(jobs)
+    }

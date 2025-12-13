@@ -33,3 +33,36 @@ class ApostilasListResponse(BaseModel):
     """Modelo de resposta para lista de apostilas."""
     apostilas: List[ApostilaResponse]
     total: int
+
+
+# === Modelos para Jobs de Geração (Polling) ===
+
+class CreateJobRequest(BaseModel):
+    """Request para criar um novo job de geração."""
+    theme: str = Field(..., description="O tema principal do livro")
+    area_tecnologica: str = Field(..., description="A área tecnológica do livro")
+    target_audience: str = Field(..., description="O público-alvo do livro")
+    num_chapters: int = Field(5, description="Número de capítulos desejados", ge=1, le=100)
+
+class CreateJobResponse(BaseModel):
+    """Response ao criar um job de geração."""
+    job_id: str
+    status: str
+    message: str
+
+class JobStatusResponse(BaseModel):
+    """Response com status completo de um job."""
+    id: str
+    status: str  # pending, processing, completed, failed, timeout
+    progress: int
+    current_step: Optional[str] = None
+    content: Optional[str] = None
+    apostila_id: Optional[str] = None
+    download_url: Optional[str] = None
+    error_message: Optional[str] = None
+    theme: str
+    area_tecnologica: str
+    target_audience: str
+    num_chapters: int
+    created_at: str
+    updated_at: str
