@@ -146,3 +146,56 @@ def download_from_gcs(blob_name: str) -> bytes:
     
     return content
 
+
+def blob_exists(blob_name: str) -> bool:
+    """
+    Verifica se um blob existe no GCS.
+    
+    Args:
+        blob_name: Nome do blob no GCS
+    
+    Returns:
+        True se existe, False caso contrário
+    """
+    if not GCS_BUCKET_NAME:
+        return False
+    
+    try:
+        client = get_storage_client()
+        bucket = client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(blob_name)
+        return blob.exists()
+    except Exception as e:
+        logger.error(f"Erro ao verificar blob {blob_name}: {e}")
+        return False
+
+
+def upload_bytes_to_gcs(content: bytes, blob_name: str, content_type: str = "application/pdf") -> tuple[str, str, int]:
+    """
+    Faz upload de bytes para o Google Cloud Storage.
+    
+    Args:
+        content: Conteúdo em bytes
+        blob_name: Nome do blob no GCS
+        content_type: Tipo MIME do conteúdo
+    
+    Returns:
+        Tuple com (gcs_url, blob_name, file_size_bytes)
+    """
+    if not GCS_BUCKET_NAME:
+        raise ValueError("GCS_BUCKET_NAME não configurado nas variáveis de ambiente")
+    
+    logger.info(f"Fazendo upload de bytes para gs://{GCS_BUCKET_NAME}/{blob_name}")
+    
+    client = get_storage_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob = bucket.blob(blob_name)
+    
+    blob.upload_from_string(content, content_type=content_type)
+    
+    gcs_url = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+    file_size = len(content)
+    
+    logger.info(f"Upload concluído: {gcs_url} ({file_size} bytes)")
+    
+    return gcs_url, blob_name, file_size

@@ -3,6 +3,7 @@ import os
 import json
 import logging
 import uuid as uuid_lib
+import requests
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
@@ -14,7 +15,7 @@ from api.models import (
 )
 from api.database import get_db, init_db
 from api.db_models import Apostila, GenerationJob
-from api.storage import upload_to_gcs, generate_signed_url
+from api.storage import upload_to_gcs, generate_signed_url, download_from_gcs, blob_exists, upload_bytes_to_gcs
 from api.auth_middleware import get_current_user, AuthenticatedUser
 from api.worker import start_generation_job
 
@@ -125,8 +126,7 @@ async def list_apostilas(
 async def download_apostila(
     user_id: str, 
     apostila_id: str, 
-    db: Session = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     Gera URL assinada para download de uma apostila do GCS.
@@ -200,6 +200,104 @@ async def preview_apostila(
     except Exception as e:
         logger.error(f"Erro ao fazer preview: {e}")
         raise HTTPException(status_code=500, detail="Erro ao carregar documento")
+
+
+# ===== ENDPOINT DE CONVERSÃO PARA PDF =====
+
+# Configurações do serviço de conversão
+CONVERTER_SERVICE_URL = os.getenv("CONVERTER_SERVICE_URL", "http://localhost:8080")
+CONVERTER_API_KEY = os.getenv("CONVERTER_API_KEY", os.getenv("API_KEY", ""))
+
+
+@app.get("/apostilas/{user_id}/{apostila_id}/pdf")
+async def get_apostila_pdf(
+    user_id: str,
+    apostila_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Converte uma apostila DOCX para PDF.
+    
+    - Verifica se PDF já existe em cache (GCS)
+    - Se não existe, baixa DOCX e envia para serviço de conversão
+    - Faz cache do PDF no GCS para próximas requisições
+    - Retorna URL assinada para download
+    """
+    logger.info(f"Gerando PDF para apostila {apostila_id}")
+    
+    # Validar apostila_id como UUID
+    try:
+        uuid_lib.UUID(apostila_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de apostila inválido")
+    
+    # Buscar apostila
+    apostila = db.query(Apostila).filter(
+        Apostila.id == apostila_id,
+        Apostila.user_id == user_id
+    ).first()
+    
+    if not apostila:
+        raise HTTPException(status_code=404, detail="Apostila não encontrada")
+    
+    # Gerar nome do blob PDF baseado no blob DOCX
+    pdf_blob_name = apostila.gcs_blob_name.replace(".docx", ".pdf").replace(".DOCX", ".pdf")
+    
+    # Verificar se PDF já existe em cache
+    if blob_exists(pdf_blob_name):
+        logger.info(f"PDF encontrado em cache: {pdf_blob_name}")
+        signed_url = generate_signed_url(pdf_blob_name, expiration_minutes=60)
+        return RedirectResponse(url=signed_url)
+    
+    # PDF não existe, precisa converter
+    logger.info(f"PDF não encontrado em cache, convertendo...")
+    
+    try:
+        # 1. Baixar DOCX do GCS
+        docx_bytes = download_from_gcs(apostila.gcs_blob_name)
+        logger.info(f"DOCX baixado: {len(docx_bytes)} bytes")
+        
+        # 2. Enviar para serviço de conversão
+        headers = {}
+        if CONVERTER_API_KEY:
+            headers["X-API-Key"] = CONVERTER_API_KEY
+        
+        # Montar o nome do arquivo para o serviço
+        docx_filename = f"{apostila.title}.docx".replace(" ", "_")
+        
+        response = requests.post(
+            f"{CONVERTER_SERVICE_URL}/convert",
+            headers=headers,
+            files={"file": (docx_filename, docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+            timeout=120  # 2 minutos de timeout
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Erro no serviço de conversão: {response.status_code} - {response.text}")
+            raise HTTPException(status_code=500, detail="Erro na conversão para PDF")
+        
+        pdf_bytes = response.content
+        logger.info(f"PDF recebido do conversor: {len(pdf_bytes)} bytes")
+        
+        # 3. Salvar PDF no GCS (cache)
+        upload_bytes_to_gcs(pdf_bytes, pdf_blob_name, content_type="application/pdf")
+        logger.info(f"PDF salvo em cache: {pdf_blob_name}")
+        
+        # 4. Gerar URL assinada
+        signed_url = generate_signed_url(pdf_blob_name, expiration_minutes=60)
+        
+        return RedirectResponse(url=signed_url)
+        
+    except requests.exceptions.Timeout:
+        logger.error("Timeout ao conectar com serviço de conversão")
+        raise HTTPException(status_code=504, detail="Timeout na conversão para PDF")
+    except requests.exceptions.ConnectionError:
+        logger.error("Erro de conexão com serviço de conversão")
+        raise HTTPException(status_code=503, detail="Serviço de conversão indisponível")
+    except Exception as e:
+        logger.error(f"Erro ao converter para PDF: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro na conversão: {str(e)}")
+
 
 # ===== ENDPOINT DE GERAÇÃO COM PERSISTÊNCIA =====
 
