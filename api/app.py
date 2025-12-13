@@ -397,12 +397,15 @@ async def create_generation_job(
 @app.get("/jobs/{job_id}/status", response_model=JobStatusResponse)
 async def get_job_status(
     job_id: str,
-    db: Session = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     Retorna o status atual de um job de geração.
     Use este endpoint para polling (recomendado: a cada 20 segundos).
+    
+    Nota: Este endpoint não requer autenticação porque:
+    1. O job_id (UUID) é secreto e só conhecido por quem criou
+    2. Evita problemas de token expirado durante geração longa (até 60min)
     """
     # Validar job_id como UUID
     try:
@@ -410,13 +413,14 @@ async def get_job_status(
     except ValueError:
         raise HTTPException(status_code=400, detail="ID de job inválido")
     
+    # Buscar job apenas pelo ID (UUID funciona como autenticação)
     job = db.query(GenerationJob).filter(
-        GenerationJob.id == job_id,
-        GenerationJob.user_id == current_user.sub
+        GenerationJob.id == job_id
     ).first()
     
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
+
     
     return JobStatusResponse(
         id=str(job.id),
