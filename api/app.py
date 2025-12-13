@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import logging
+import uuid as uuid_lib
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
@@ -126,6 +127,12 @@ async def download_apostila(
     """
     logger.info(f"Gerando URL de download para apostila {apostila_id}")
     
+    # Validar apostila_id como UUID para prevenir Open Redirect
+    try:
+        uuid_lib.UUID(apostila_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de apostila inválido")
+    
     apostila = db.query(Apostila).filter(
         Apostila.id == apostila_id,
         Apostila.user_id == user_id
@@ -156,6 +163,12 @@ async def preview_apostila(
     import io
     
     logger.info(f"Gerando preview para apostila {apostila_id}")
+    
+    # Validar apostila_id como UUID para prevenir Open Redirect
+    try:
+        uuid_lib.UUID(apostila_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de apostila inválido")
     
     apostila = db.query(Apostila).filter(
         Apostila.id == apostila_id,
@@ -277,11 +290,18 @@ async def generate_book(
                                         logger.info(f"Apostila salva com sucesso: {apostila_id}")
                                         
                                         # Limpar arquivo temporário após upload
-                                        try:
-                                            os.remove(export_path)
-                                            logger.info(f"Arquivo temporário removido: {export_path}")
-                                        except Exception as cleanup_err:
-                                            logger.warning(f"Não foi possível remover arquivo temporário: {cleanup_err}")
+                                        # Validar que o arquivo está no diretório temporário (previne Path Traversal)
+                                        import tempfile
+                                        temp_dir = tempfile.gettempdir()
+                                        real_path = os.path.realpath(export_path)
+                                        if real_path.startswith(os.path.realpath(temp_dir)):
+                                            try:
+                                                os.remove(export_path)
+                                                logger.info(f"Arquivo temporário removido: {export_path}")
+                                            except Exception as cleanup_err:
+                                                logger.warning(f"Não foi possível remover arquivo temporário: {cleanup_err}")
+                                        else:
+                                            logger.warning(f"Tentativa de remover arquivo fora do diretório temporário: {export_path}")
                                     finally:
                                         db.close()
                                         
