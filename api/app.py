@@ -465,7 +465,7 @@ async def get_user_active_jobs(
 # ===== ENDPOINT DE REFINAMENTO DE TEMA =====
 
 @app.post("/refine-theme", response_model=RefineThemeResponse)
-async def refine_theme(request: RefineThemeRequest):
+async def refine_theme(request: RefineThemeRequest, db: Session = Depends(get_db), current_user: AuthenticatedUser = Depends(get_current_user)):
     """
     Refina e melhora a descrição do tema usando IA.
     Endpoint público para facilitar o uso durante a criação.
