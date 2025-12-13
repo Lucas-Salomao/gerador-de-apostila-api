@@ -71,10 +71,17 @@ def run_generation_job(job_id: str):
                         job.current_step = item.get("text", "")
                         db.commit()
                     
-                    # Capturar estado final
-                    if "export_path" in item:
+                    # Capturar estado final (vem como {"final_state": {...}})
+                    if "final_state" in item:
+                        final_state = item.get("final_state", {})
+                        final_export_path = final_state.get("export_path")
+                        final_title = final_state.get("title")
+                        logger.info(f"Capturado final_state: export_path={final_export_path}, title={final_title}")
+                    
+                    # Fallback: capturar diretamente se vier assim
+                    elif "export_path" in item:
                         final_export_path = item.get("export_path")
-                    if "title" in item:
+                    if "title" in item and not final_title:
                         final_title = item.get("title")
                 
                 elif isinstance(item, str):
