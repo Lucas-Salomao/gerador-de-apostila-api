@@ -48,6 +48,7 @@ async def startup_event():
     try:
         init_db()
         logger.info("Banco de dados inicializado com sucesso")
+        logger.info("Documentação disponível em: http://localhost:8000/docs")
     except Exception as e:
         logger.warning(f"Não foi possível inicializar o banco de dados: {e}")
 
