@@ -676,19 +676,45 @@ def agent_book_generator(area_tecnologica: str = "", custom_audience: str = "", 
                 current_step = 2
                 progress_update = {
                     "type": "progress",
-                    "text": f"Etapa {current_step}/{total_steps}: Criando sumário...",
+                    "text": f"Etapa {current_step}/{total_steps}: Sumário criado!",
                     "value": int((current_step / total_steps) * 100)
                 }
+                # Emitir progresso do sumário
+                yield progress_update
+                
+                # Anunciar que vai começar a escrever o primeiro capítulo
+                progress_update = {
+                    "type": "progress",
+                    "text": f"Etapa 3/{total_steps}: Escrevendo capítulo 1/{custom_num_chapters}...",
+                    "value": int((2.5 / total_steps) * 100)
+                }
             elif node_name == "write_chapter" and "chapters" in node_output:
+                # current_chapter indica o PRÓXIMO capítulo a ser escrito
+                # Então o capítulo que acabou de ser concluído é current_chapter - 1
                 written_chapter_num = node_output.get("current_chapter", 1) - 1
+                next_chapter_num = node_output.get("current_chapter", 1)
+                total_chapters = len(node_output["chapters"])
+                
                 if written_chapter_num > 0:
                     current_step = 2 + written_chapter_num
-                    total_chapters = len(node_output["chapters"])
+                    # Mensagem de conclusão do capítulo atual
                     progress_update = {
                         "type": "progress",
-                        "text": f"Etapa {current_step}/{total_steps}: Escrevendo capítulo {written_chapter_num}/{total_chapters}...",
+                        "text": f"Etapa {current_step}/{total_steps}: Capítulo {written_chapter_num}/{total_chapters} concluído!",
                         "value": int((current_step / total_steps) * 100)
                     }
+                    # Emitir progresso de conclusão
+                    yield progress_update
+                    
+                    # Se ainda há capítulos a escrever, anunciar o próximo
+                    if next_chapter_num <= total_chapters:
+                        progress_update = {
+                            "type": "progress",
+                            "text": f"Etapa {current_step + 1}/{total_steps}: Escrevendo capítulo {next_chapter_num}/{total_chapters}...",
+                            "value": int(((current_step + 0.5) / total_steps) * 100)
+                        }
+                    else:
+                        progress_update = None
             elif stage == "reviewed":
                 current_step = 2 + custom_num_chapters + 1
                 progress_update = {
