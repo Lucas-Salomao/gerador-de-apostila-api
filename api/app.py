@@ -9,7 +9,8 @@ from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from api.models import (
     BookRequest, ProgressUpdate, ApostilaResponse, ApostilasListResponse,
-    CreateJobRequest, CreateJobResponse, JobStatusResponse
+    CreateJobRequest, CreateJobResponse, JobStatusResponse,
+    RefineThemeRequest, RefineThemeResponse
 )
 from api.database import get_db, init_db
 from api.db_models import Apostila, GenerationJob
@@ -17,7 +18,7 @@ from api.storage import upload_to_gcs, generate_signed_url
 from api.auth_middleware import get_current_user, AuthenticatedUser
 from api.worker import start_generation_job
 
-from api.agent import agent_book_generator
+from api.agent import agent_book_generator, get_model, generate_with_retry
 
 # Configure logging
 logging.basicConfig(
@@ -459,3 +460,66 @@ async def get_user_active_jobs(
         "jobs": [job.to_dict() for job in jobs],
         "total": len(jobs)
     }
+
+
+# ===== ENDPOINT DE REFINAMENTO DE TEMA =====
+
+@app.post("/refine-theme", response_model=RefineThemeResponse)
+async def refine_theme(request: RefineThemeRequest):
+    """
+    Refina e melhora a descrição do tema usando IA.
+    Endpoint público para facilitar o uso durante a criação.
+    
+    Usa técnicas de prompt engineering para:
+    - Expandir e enriquecer a descrição
+    - Adicionar detalhes técnicos relevantes
+    - Sugerir tópicos específicos a serem abordados
+    - Manter o contexto educacional
+    """
+    logger.info(f"Refinando tema: {request.theme[:50]}...")
+    
+    prompt = f"""Você é um especialista em design instrucional e criação de conteúdo educacional técnico-profissional para o SENAI (Serviço Nacional de Aprendizagem Industrial).
+
+Sua tarefa é refinar e enriquecer a seguinte descrição de tema para uma apostila técnica, mantendo a intenção original do usuário, mas tornando-a mais completa e específica.
+
+## Tema Original do Usuário:
+"{request.theme}"
+
+## Instruções de Refinamento:
+1. **Mantenha a essência**: Preserve a intenção e o foco principal do tema original
+2. **Expanda com contexto**: Adicione contexto sobre a área de aplicação e relevância prática
+3. **Detalhe tópicos**: Sugira 3-5 tópicos ou competências específicas que poderiam ser abordadas
+4. **Seja específico**: Use terminologia técnica apropriada para a área
+5. **Foque na prática**: Inclua aspectos práticos e aplicáveis ao mercado de trabalho
+6. **Mantenha conciso**: O resultado deve ter entre 2-4 frases, sendo rico em informações mas direto
+
+## Exemplo de Refinamento:
+- Original: "Python para iniciantes"
+- Refinado: "Introdução à programação Python para análise de dados, abordando desde a sintaxe básica e estruturas de dados até bibliotecas essenciais como Pandas e NumPy, com projetos práticos de manipulação e visualização de datasets reais."
+
+## Responda APENAS com o tema refinado, sem explicações adicionais ou marcadores. Não use aspas na resposta."""
+
+    try:
+        model = get_model()
+        response = generate_with_retry(model, prompt, retries=2, delay=3)
+        
+        if not response or not response.text:
+            logger.error("Falha ao gerar refinamento do tema")
+            raise HTTPException(status_code=500, detail="Erro ao refinar tema. Tente novamente.")
+        
+        refined = response.text.strip()
+        
+        # Remove aspas se presentes no início/fim
+        if refined.startswith('"') and refined.endswith('"'):
+            refined = refined[1:-1]
+        if refined.startswith("'") and refined.endswith("'"):
+            refined = refined[1:-1]
+        
+        logger.info(f"Tema refinado com sucesso: {refined[:50]}...")
+        return RefineThemeResponse(refined_theme=refined)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao refinar tema: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar refinamento: {str(e)}")

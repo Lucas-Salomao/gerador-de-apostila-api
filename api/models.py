@@ -66,3 +66,15 @@ class JobStatusResponse(BaseModel):
     num_chapters: int
     created_at: str
     updated_at: str
+
+
+# === Modelos para Refinamento de Tema ===
+
+class RefineThemeRequest(BaseModel):
+    """Request para refinar/melhorar o tema da apostila."""
+    theme: str = Field(..., description="O tema a ser refinado/melhorado", min_length=1)
+
+class RefineThemeResponse(BaseModel):
+    """Response com o tema refinado."""
+    refined_theme: str = Field(..., description="O tema refinado e melhorado")
+
