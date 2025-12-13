@@ -317,5 +317,13 @@ async def generate_book(
             error_update = ProgressUpdate(type="error", text=str(e))
             yield f"data: {error_update.model_dump_json()}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Accel-Buffering": "no",  # Desabilita buffering no proxy/reverse proxy
+            "Connection": "keep-alive",
+        }
+    )
 
