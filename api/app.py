@@ -275,6 +275,13 @@ async def generate_book(
                                         # Gerar URL de download via GCS
                                         download_url = f"/apostilas/{request.user_id}/{apostila_id}/download"
                                         logger.info(f"Apostila salva com sucesso: {apostila_id}")
+                                        
+                                        # Limpar arquivo temporário após upload
+                                        try:
+                                            os.remove(export_path)
+                                            logger.info(f"Arquivo temporário removido: {export_path}")
+                                        except Exception as cleanup_err:
+                                            logger.warning(f"Não foi possível remover arquivo temporário: {cleanup_err}")
                                     finally:
                                         db.close()
                                         

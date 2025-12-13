@@ -1,4 +1,5 @@
 import os
+import tempfile
 from typing import Dict, List, Tuple, Any, TypedDict, Optional
 import json
 from pathlib import Path
@@ -294,16 +295,14 @@ def review_and_edit(state: BookState, model) -> Dict[str, Any]:
     return updates
 
 def export_feedback(state: BookState) -> Dict[str, Any]:
-    """Exporta o feedback para um arquivo TXT."""
-    logger.info("Exportando feedback para TXT...")
-    feedback_path = f"{state['title'].replace(' ', '_')}_feedback.txt"
-    with open(feedback_path, "w", encoding="utf-8") as f:
-        f.write(state["feedback"])
+    """Processa o feedback (sem criar arquivo local - feedback já está embutido no DOCX)."""
+    logger.info("Processando feedback...")
+    # Não salvamos mais arquivo TXT local, o feedback é embutido no DOCX
     updates = {
-        "feedback_path": feedback_path,
+        "feedback_path": None,  # Não há mais arquivo local
         "status": "feedback_exported"
     }
-    logger.info(f"Feedback exportado com sucesso para: {feedback_path}")
+    logger.info("Feedback processado (embutido no documento final).")
     return updates
 
 # def export_book(state: BookState) -> Dict[str, Any]:
@@ -572,7 +571,11 @@ def export_book(state: BookState) -> Dict[str, Any]:
         doc.add_heading("Feedback da Revisão", level=1)
         process_markdown(state["feedback"], doc)
 
-    doc_path = f"{state['title'].replace(' ', '_')}.docx"
+    # Salvar em arquivo temporário (não na raiz do projeto)
+    # O arquivo será enviado para o GCS e depois apagado automaticamente
+    temp_dir = tempfile.gettempdir()
+    safe_title = state['title'].replace(' ', '_').replace('/', '_').replace('\\', '_')
+    doc_path = os.path.join(temp_dir, f"{safe_title}.docx")
     doc.save(doc_path)
 
     updates = {
