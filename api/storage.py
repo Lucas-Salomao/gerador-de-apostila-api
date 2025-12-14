@@ -6,6 +6,8 @@ import logging
 from datetime import timedelta
 from google.cloud import storage
 from dotenv import load_dotenv
+import google.auth
+import google.auth.transport.requests
 
 load_dotenv()
 
@@ -69,6 +71,9 @@ def generate_signed_url(blob_name: str, expiration_minutes: int = 60) -> str:
     """
     Gera uma URL assinada para download temporário de um arquivo.
     
+    Suporta tanto credenciais locais (Service Account Key) quanto
+    credenciais do Compute Engine/Cloud Run (usando IAM Signing API).
+    
     Args:
         blob_name: Nome do blob no GCS
         expiration_minutes: Tempo de expiração da URL em minutos
@@ -85,11 +90,31 @@ def generate_signed_url(blob_name: str, expiration_minutes: int = 60) -> str:
     bucket = client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(blob_name)
     
-    url = blob.generate_signed_url(
-        version="v4",
-        expiration=timedelta(minutes=expiration_minutes),
-        method="GET"
-    )
+    # Obter credenciais padrão
+    credentials, project = google.auth.default()
+    
+    # Verificar se as credenciais podem assinar diretamente (Service Account Key)
+    # ou se precisam usar IAM Signing (Compute Engine/Cloud Run)
+    if hasattr(credentials, 'sign_bytes'):
+        # Credenciais com chave privada - assinar diretamente
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(minutes=expiration_minutes),
+            method="GET"
+        )
+    else:
+        # Credenciais sem chave privada (Cloud Run) - usar IAM Signing
+        # Refresh para garantir que temos um token válido
+        auth_request = google.auth.transport.requests.Request()
+        credentials.refresh(auth_request)
+        
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(minutes=expiration_minutes),
+            method="GET",
+            service_account_email=credentials.service_account_email,
+            access_token=credentials.token,
+        )
     
     logger.info(f"URL assinada gerada com expiração de {expiration_minutes} minutos")
     
