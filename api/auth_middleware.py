@@ -1,13 +1,17 @@
 """
 Middleware de autenticação JWT para validação de tokens do WSO2.
+
+Nota: Migrado de python-jose para pyjwt para corrigir vulnerabilidades
+de segurança no pacote ecdsa (SNYK-PYTHON-ECDSA-6184115, SNYK-PYTHON-ECDSA-6219992).
 """
 import os
 import logging
 from typing import Optional
 from functools import lru_cache
 import httpx
-from jose import jwt, JWTError, jwk
-from jose.exceptions import JWKError
+import jwt
+from jwt import PyJWKClient, PyJWKClientError
+from jwt.exceptions import InvalidTokenError, DecodeError
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -24,54 +28,36 @@ WSO2_AUDIENCE = os.getenv("WSO2_AUDIENCE")  # Client ID do WSO2
 # Esquema de segurança HTTP Bearer
 security = HTTPBearer(auto_error=False)
 
-# Cache para armazenar as chaves JWKS
-_jwks_cache: Optional[dict] = None
+# Cliente JWKS com cache automático
+_jwk_client: Optional[PyJWKClient] = None
 
 
-async def get_jwks() -> dict:
+def get_jwk_client() -> PyJWKClient:
     """
-    Busca as chaves públicas (JWKS) do WSO2 para validar tokens.
-    Usa cache em memória para evitar requisições repetidas.
+    Retorna o cliente JWKS com cache automático.
+    O PyJWKClient gerencia o cache de chaves internamente.
     """
-    global _jwks_cache
+    global _jwk_client
     
-    if _jwks_cache is not None:
-        return _jwks_cache
+    if _jwk_client is None:
+        logger.info(f"Inicializando cliente JWKS para {WSO2_JWKS_URL}")
+        _jwk_client = PyJWKClient(WSO2_JWKS_URL, cache_keys=True, lifespan=3600)
     
-    logger.info(f"Buscando JWKS de {WSO2_JWKS_URL}")
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(WSO2_JWKS_URL, timeout=10.0)
-            response.raise_for_status()
-            _jwks_cache = response.json()
-            logger.info(f"JWKS obtido com sucesso. {len(_jwks_cache.get('keys', []))} chaves encontradas.")
-            return _jwks_cache
-    except Exception as e:
-        logger.error(f"Erro ao buscar JWKS: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao validar autenticação")
+    return _jwk_client
 
 
-def get_signing_key(token: str, jwks: dict) -> dict:
+def get_signing_key(token: str) -> jwt.PyJWK:
     """
     Encontra a chave correta no JWKS baseado no 'kid' do token.
     """
     try:
-        # Decodifica o header do token sem validar
-        unverified_header = jwt.get_unverified_header(token)
-        kid = unverified_header.get("kid")
-        
-        if not kid:
-            raise HTTPException(status_code=401, detail="Token inválido: kid não encontrado")
-        
-        # Procura a chave com o kid correspondente
-        for key in jwks.get("keys", []):
-            if key.get("kid") == kid:
-                return key
-        
+        jwk_client = get_jwk_client()
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+        return signing_key
+    except PyJWKClientError as e:
+        logger.error(f"Erro ao obter chave de assinatura: {e}")
         raise HTTPException(status_code=401, detail="Token inválido: chave não encontrada")
-    
-    except JWTError as e:
+    except DecodeError as e:
         logger.error(f"Erro ao decodificar header do token: {e}")
         raise HTTPException(status_code=401, detail="Token inválido")
 
@@ -119,32 +105,23 @@ async def get_current_user(
     token = credentials.credentials
     
     try:
-        # Buscar JWKS
-        jwks = await get_jwks()
-        
-        # Encontrar a chave de assinatura
-        signing_key = get_signing_key(token, jwks)
-        
-        # Construir a chave pública a partir do JWK
-        public_key = jwk.construct(signing_key)
-        
-        # Opções de validação
-        options = {
-            "verify_signature": True,
-            "verify_aud": False,  # Desabilitado por enquanto, pode ser habilitado se necessário
-            "verify_iss": True,
-            "verify_exp": True,
-            "verify_iat": True,
-            "require_exp": True,
-        }
+        # Encontrar a chave de assinatura usando PyJWKClient
+        signing_key = get_signing_key(token)
         
         # Decodificar e validar o token
         payload = jwt.decode(
             token,
-            public_key,
+            signing_key.key,
             algorithms=["RS256"],
             issuer=WSO2_ISSUER,
-            options=options
+            options={
+                "verify_signature": True,
+                "verify_aud": False,  # Desabilitado por enquanto
+                "verify_iss": True,
+                "verify_exp": True,
+                "verify_iat": True,
+                "require": ["exp", "iat", "sub"],
+            }
         )
         
         # Extrair claims
@@ -162,14 +139,14 @@ async def get_current_user(
         logger.debug(f"Usuário autenticado: {user.sub}")
         return user
         
-    except JWTError as e:
+    except InvalidTokenError as e:
         logger.warning(f"Erro de validação JWT: {e}")
         raise HTTPException(
             status_code=401,
             detail="Token inválido ou expirado",
             headers={"WWW-Authenticate": "Bearer"}
         )
-    except JWKError as e:
+    except PyJWKClientError as e:
         logger.error(f"Erro ao processar chave JWK: {e}")
         raise HTTPException(status_code=401, detail="Erro ao validar token")
     except HTTPException:
