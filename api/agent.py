@@ -103,6 +103,7 @@ class BookState(TypedDict, total=False):
     title: str
     area_tecnologica: str
     target_audience: str
+    author_name: str
     num_chapters: int
     outline: List[Dict[str, Any]]
     chapters: Dict[int, Dict[str, str]]
@@ -620,7 +621,7 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
     # 2. Atualizar propriedades do documento (metadados internos do Word)
     try:
         doc.core_properties.title = state["title"]
-        doc.core_properties.author = "SENAI"
+        doc.core_properties.author = state.get("author_name", "SENAI")
         doc.core_properties.subject = state["theme"]
         doc.core_properties.keywords = state.get("area_tecnologica", "")
         doc.core_properties.comments = f"Público-alvo: {state.get('target_audience', 'Não especificado')}"
@@ -827,7 +828,30 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
     # Os parágrafos de exemplo ficam após onde era o placeholder
     # Não removeremos para manter a estrutura, mas o conteúdo foi inserido
     
-    # 8. Salvar arquivo temporário
+    # 8. Marcar campos (TOC) para atualização automática ao abrir
+    # Isso faz o Word perguntar "Deseja atualizar os campos?" ao abrir
+    try:
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        
+        # Acessar settings.xml do documento
+        settings = doc.settings.element
+        
+        # Verificar se já existe updateFields
+        update_fields = settings.find(qn('w:updateFields'))
+        if update_fields is None:
+            # Criar elemento updateFields com valor true
+            update_fields = OxmlElement('w:updateFields')
+            update_fields.set(qn('w:val'), 'true')
+            settings.append(update_fields)
+        else:
+            update_fields.set(qn('w:val'), 'true')
+        
+        logger.info("Campos marcados para atualização automática ao abrir")
+    except Exception as e:
+        logger.warning(f"Não foi possível marcar campos para atualização: {e}")
+    
+    # 9. Salvar arquivo temporário
     temp_dir = tempfile.gettempdir()
     safe_title = state['title'].replace(' ', '_').replace('/', '_').replace('\\', '_')
     doc_path = os.path.join(temp_dir, f"{safe_title}.docx")
@@ -898,7 +922,7 @@ def generate_with_retry(model, prompt, retries=3, delay=5):
     logger.error("Falha ao gerar conteúdo após múltiplas tentativas.")
     return None # Ou lançar uma exceção
 
-def agent_book_generator(area_tecnologica: str = "", custom_audience: str = "", custom_theme: str = "", custom_num_chapters: int = 5):
+def agent_book_generator(area_tecnologica: str = "", custom_audience: str = "", custom_theme: str = "", custom_num_chapters: int = 5, author_name: str = "SENAI"):
     """Executa o agente de geração de livros e emite atualizações de progresso."""
     logger.info("Iniciando processo de geração de livro...")
     try:
@@ -911,6 +935,7 @@ def agent_book_generator(area_tecnologica: str = "", custom_audience: str = "", 
         if area_tecnologica: initial_state["area_tecnologica"] = area_tecnologica
         if custom_audience: initial_state["target_audience"] = custom_audience
         initial_state["num_chapters"] = custom_num_chapters
+        initial_state["author_name"] = author_name
 
         config = {"configurable": {"thread_id": "1"}, "recursion_limit": 1000}
 

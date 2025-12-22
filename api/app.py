@@ -473,6 +473,7 @@ async def create_generation_job(
         area_tecnologica=request.area_tecnologica,
         target_audience=request.target_audience,
         num_chapters=request.num_chapters,
+        author_name=request.author_name or "SENAI",
         status="pending",
         progress=0,
         current_step="Aguardando início..."

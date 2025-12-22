@@ -70,6 +70,7 @@ class GenerationJob(Base):
     area_tecnologica = Column(String(255), nullable=False)
     target_audience = Column(String(255), nullable=False)
     num_chapters = Column(Integer, nullable=False)
+    author_name = Column(String(255), default="SENAI")
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -91,6 +92,7 @@ class GenerationJob(Base):
             "area_tecnologica": self.area_tecnologica,
             "target_audience": self.target_audience,
             "num_chapters": self.num_chapters,
+            "author_name": self.author_name,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

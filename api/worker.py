@@ -52,7 +52,8 @@ def run_generation_job(job_id: str):
                 area_tecnologica=job.area_tecnologica,
                 custom_audience=job.target_audience,
                 custom_theme=job.theme,
-                custom_num_chapters=job.num_chapters
+                custom_num_chapters=job.num_chapters,
+                author_name=job.author_name or "SENAI"
             )
             
             for item in iterator:

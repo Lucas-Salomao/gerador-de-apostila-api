@@ -43,6 +43,7 @@ class CreateJobRequest(BaseModel):
     area_tecnologica: str = Field(..., description="A área tecnológica do livro")
     target_audience: str = Field(..., description="O público-alvo do livro")
     num_chapters: int = Field(5, description="Número de capítulos desejados", ge=1, le=100)
+    author_name: Optional[str] = Field("SENAI", description="Nome do autor/docente")
 
 class CreateJobResponse(BaseModel):
     """Response ao criar um job de geração."""
