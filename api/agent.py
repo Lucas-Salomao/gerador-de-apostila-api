@@ -232,8 +232,21 @@ def write_chapter(state: BookState, model, st_session=None) -> Dict[str, Any]:
     
     {prev_content}
     
-    Escreva um texto técnico e analítico, com linguagem formal e objetiva. Inclua informações técnicas detalhadas, exemplos contextualizados (reais ou hipotéticos), dados relevantes e explicações claras. Evite diálogos narrativos ou descrições literárias excessivas. Estruture o conteúdo com seções claras (ex.: introdução, desenvolvimento, análise, exemplos, conclusão). O capítulo deve ter pelo menos 3000 palavras. Seja o mais detalhista e técnico possível e aborde o tema do capítulo com profundidade técnica e bastante exemplos.
-    Estruture o capítulo com títulos e subtítulos para facilitar a leitura e compreensão do conteúdo. Siga a numeração do capítulo e estruture os subtítulos com base na numeração do capítulo.
+    INSTRUÇÕES IMPORTANTES:
+    - Comece DIRETAMENTE com o conteúdo do capítulo, SEM introduções como "Segue o capítulo...", "Com certeza...", "Aqui está..." ou qualquer preâmbulo.
+    - NÃO repita o título do livro, área tecnológica ou público-alvo no início do capítulo.
+    - NÃO inclua linhas separadoras (---) no início.
+    - Inicie imediatamente com a primeira seção ou parágrafo do conteúdo técnico.
+    
+    FORMATO DO CONTEÚDO:
+    - Escreva um texto técnico e analítico, com linguagem formal e objetiva.
+    - Inclua informações técnicas detalhadas, exemplos contextualizados (reais ou hipotéticos), dados relevantes e explicações claras.
+    - Evite diálogos narrativos ou descrições literárias excessivas.
+    - Estruture o conteúdo com seções claras (ex.: introdução, desenvolvimento, análise, exemplos, conclusão).
+    - O capítulo deve ter pelo menos 3000 palavras.
+    - Seja o mais detalhista e técnico possível e aborde o tema do capítulo com profundidade técnica e bastante exemplos.
+    - Estruture o capítulo com títulos e subtítulos para facilitar a leitura e compreensão do conteúdo.
+    - Siga a numeração do capítulo e estruture os subtítulos com base na numeração do capítulo (ex: {current}.1, {current}.2, etc).
     """
 
     response = generate_with_retry(model, prompt)
@@ -586,6 +599,247 @@ def export_book(state: BookState) -> Dict[str, Any]:
     return updates
 
 
+# ===== GERAÇÃO COM TEMPLATE =====
+# Flag para usar template DOCX (True = usa template, False = cria do zero)
+USE_TEMPLATE = True
+
+def export_book_from_template(state: BookState) -> Dict[str, Any]:
+    """Exporta o livro usando template DOCX pré-configurado."""
+    logger.info("Exportando livro usando template DOCX...")
+    
+    # 1. Carregar template
+    template_path = Path(__file__).parent.parent / "template" / "Template Docx.docx"
+    if not template_path.exists():
+        logger.error(f"Template não encontrado: {template_path}")
+        # Fallback para geração sem template
+        return export_book(state)
+    
+    doc = Document(template_path)
+    logger.info(f"Template carregado: {template_path}")
+    
+    # 2. Atualizar propriedades do documento (metadados internos do Word)
+    try:
+        doc.core_properties.title = state["title"]
+        doc.core_properties.author = "SENAI"
+        doc.core_properties.subject = state["theme"]
+        doc.core_properties.keywords = state.get("area_tecnologica", "")
+        doc.core_properties.comments = f"Público-alvo: {state.get('target_audience', 'Não especificado')}"
+        logger.info("Propriedades do documento atualizadas")
+    except Exception as e:
+        logger.warning(f"Não foi possível atualizar propriedades do documento: {e}")
+    
+    # 3. Função auxiliar para processar Markdown e aplicar estilos do template
+    def process_markdown_with_template_styles(text: str, doc: Document, insert_index: int) -> int:
+        """
+        Processa texto Markdown e insere parágrafos usando estilos do template.
+        Retorna o último índice usado.
+        """
+        lines = text.split('\n')
+        in_code_block = False
+        code_lines = []
+        current_index = insert_index
+        
+        for line in lines:
+            line = line.rstrip()
+            if not line and not in_code_block:
+                continue
+            
+            # Blocos de código
+            if line.strip().startswith('```'):
+                if not in_code_block:
+                    in_code_block = True
+                    code_lines = []
+                else:
+                    in_code_block = False
+                    # Inserir bloco de código
+                    code_para = doc.paragraphs[current_index]._element
+                    new_para = OxmlElement('w:p')
+                    code_para.addnext(new_para)
+                    current_index += 1
+                    para = doc.paragraphs[current_index]
+                    para.style = 'Normal'
+                    run = para.add_run('\n'.join(code_lines))
+                    run.font.name = 'Courier New'
+                    run.font.size = Pt(10)
+                continue
+            
+            if in_code_block:
+                code_lines.append(line)
+                continue
+            
+            # Determinar estilo baseado no Markdown
+            style_name = 'Normal'
+            content = line
+            
+            if line.startswith('######'):
+                style_name = 'Heading 6'
+                content = line.lstrip('#').strip()
+            elif line.startswith('#####'):
+                style_name = 'Heading 5'
+                content = line.lstrip('#').strip()
+            elif line.startswith('####'):
+                style_name = 'Heading 4'
+                content = line.lstrip('#').strip()
+            elif line.startswith('###'):
+                style_name = 'Heading 3'
+                content = line.lstrip('#').strip()
+            elif line.startswith('##'):
+                style_name = 'Heading 2'
+                content = line.lstrip('#').strip()
+            elif line.startswith('#'):
+                style_name = 'Heading 1'
+                content = line.lstrip('#').strip()
+            elif line.startswith('>'):
+                style_name = 'Quote'
+                content = line.lstrip('>').strip()
+            elif re.match(r'^\s*[-*+]\s+', line):
+                style_name = 'List Paragraph'
+                content = re.sub(r'^\s*[-*+]\s+', '', line)
+            elif re.match(r'^\s*\d+\.\s+', line):
+                style_name = 'List Paragraph'
+                content = re.sub(r'^\s*\d+\.\s+', '', line)
+            
+            # Inserir novo parágrafo após o índice atual
+            current_para = doc.paragraphs[current_index]._element
+            new_para_elem = OxmlElement('w:p')
+            current_para.addnext(new_para_elem)
+            current_index += 1
+            
+            # Aplicar estilo e conteúdo
+            para = doc.paragraphs[current_index]
+            try:
+                para.style = style_name
+            except KeyError:
+                para.style = 'Normal'
+                logger.warning(f"Estilo '{style_name}' não encontrado, usando 'Normal'")
+            
+            # Aplicar formatação inline (negrito, itálico)
+            apply_inline_formatting_template(content, para)
+        
+        return current_index
+    
+    def apply_inline_formatting_template(text: str, paragraph):
+        """Aplica formatação inline (negrito, itálico, etc.) ao parágrafo."""
+        pattern = r'(\*\*\*.*?\*\*\*|\*\*.*?\*\*|\*.*?\*|~~.*?~~|_.*?_)'
+        parts = re.split(pattern, text)
+        
+        for part in parts:
+            if not part:
+                continue
+            run = paragraph.add_run()
+            if part.startswith('***') and part.endswith('***'):
+                run.text = part[3:-3]
+                run.bold = True
+                run.italic = True
+            elif part.startswith('**') and part.endswith('**'):
+                run.text = part[2:-2]
+                run.bold = True
+            elif part.startswith('*') and part.endswith('*'):
+                run.text = part[1:-1]
+                run.italic = True
+            elif part.startswith('_') and part.endswith('_'):
+                run.text = part[1:-1]
+                run.italic = True
+            elif part.startswith('~~') and part.endswith('~~'):
+                run.text = part[2:-2]
+                run.font.strike = True
+            else:
+                run.text = part
+    
+    # 4. Encontrar placeholder {{CONTEUDO}} e substituir
+    placeholder_found = False
+    placeholder_index = -1
+    
+    for i, para in enumerate(doc.paragraphs):
+        if "{{CONTEUDO}}" in para.text:
+            placeholder_found = True
+            placeholder_index = i
+            logger.info(f"Placeholder encontrado no parágrafo {i}")
+            break
+    
+    if not placeholder_found:
+        logger.warning("Placeholder {{CONTEUDO}} não encontrado. Adicionando conteúdo ao final.")
+        placeholder_index = len(doc.paragraphs) - 1
+    else:
+        # Limpar o parágrafo do placeholder
+        doc.paragraphs[placeholder_index].clear()
+    
+    # 5. Inserir conteúdo dos capítulos
+    current_idx = placeholder_index
+    
+    for chapter_num, chapter_data in sorted(state["chapters"].items()):
+        # Adicionar título do capítulo
+        current_para = doc.paragraphs[current_idx]._element
+        new_para_elem = OxmlElement('w:p')
+        current_para.addnext(new_para_elem)
+        current_idx += 1
+        
+        chapter_para = doc.paragraphs[current_idx]
+        try:
+            chapter_para.style = 'Heading 1'
+        except KeyError:
+            chapter_para.style = 'Normal'
+        chapter_para.add_run(f"Capítulo {chapter_num}: {chapter_data['title']}")
+        
+        # Processar conteúdo do capítulo
+        if chapter_data.get("content"):
+            current_idx = process_markdown_with_template_styles(
+                chapter_data["content"], 
+                doc, 
+                current_idx
+            )
+        
+        # Adicionar quebra de página entre capítulos (exceto o último)
+        if chapter_num < len(state["chapters"]):
+            current_para = doc.paragraphs[current_idx]._element
+            new_para_elem = OxmlElement('w:p')
+            current_para.addnext(new_para_elem)
+            current_idx += 1
+            doc.paragraphs[current_idx].add_run().add_break(docx.enum.text.WD_BREAK.PAGE)
+    
+    # 6. Adicionar feedback se existir
+    if state.get("feedback"):
+        current_para = doc.paragraphs[current_idx]._element
+        new_para_elem = OxmlElement('w:p')
+        current_para.addnext(new_para_elem)
+        current_idx += 1
+        doc.paragraphs[current_idx].add_run().add_break(docx.enum.text.WD_BREAK.PAGE)
+        
+        current_para = doc.paragraphs[current_idx]._element
+        new_para_elem = OxmlElement('w:p')
+        current_para.addnext(new_para_elem)
+        current_idx += 1
+        
+        feedback_para = doc.paragraphs[current_idx]
+        try:
+            feedback_para.style = 'Heading 1'
+        except KeyError:
+            feedback_para.style = 'Normal'
+        feedback_para.add_run("Feedback da Revisão")
+        
+        current_idx = process_markdown_with_template_styles(
+            state["feedback"], 
+            doc, 
+            current_idx
+        )
+    
+    # 7. Remover parágrafos de exemplo do template (após o placeholder)
+    # Os parágrafos de exemplo ficam após onde era o placeholder
+    # Não removeremos para manter a estrutura, mas o conteúdo foi inserido
+    
+    # 8. Salvar arquivo temporário
+    temp_dir = tempfile.gettempdir()
+    safe_title = state['title'].replace(' ', '_').replace('/', '_').replace('\\', '_')
+    doc_path = os.path.join(temp_dir, f"{safe_title}.docx")
+    doc.save(doc_path)
+    
+    updates = {
+        "export_path": doc_path,
+        "status": "exported"
+    }
+    logger.info(f"Livro exportado com template para: {doc_path}")
+    return updates
+
 def router(state: BookState) -> str:
     """Decide o próximo estado."""
     status_map = {
@@ -612,7 +866,14 @@ def create_book_agent(model, st_session=None):
     workflow.add_node("write_chapter", lambda state: write_chapter(state, model, st_session))
     workflow.add_node("review_and_edit", lambda state: review_and_edit(state, model))
     workflow.add_node("export_feedback", export_feedback)
-    workflow.add_node("export_book", export_book)
+    
+    # Usar template ou geração do zero baseado na flag USE_TEMPLATE
+    if USE_TEMPLATE:
+        logger.info("Usando geração com template DOCX")
+        workflow.add_node("export_book", export_book_from_template)
+    else:
+        logger.info("Usando geração do zero (sem template)")
+        workflow.add_node("export_book", export_book)
     
     workflow.set_entry_point("get_book_info")
     
