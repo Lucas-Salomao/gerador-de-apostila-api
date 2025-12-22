@@ -28,9 +28,9 @@ else:
 import docx
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
 load_dotenv()
 
@@ -619,12 +619,18 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
     logger.info(f"Template carregado: {template_path}")
     
     # 2. Atualizar propriedades do documento (metadados internos do Word)
+    # Limitar propriedades a 250 caracteres (limite do Word é 255)
+    def truncate_prop(text):
+        if not text: return ""
+        text = str(text)
+        return text[:250] + "..." if len(text) > 250 else text
+
     try:
-        doc.core_properties.title = state["title"]
-        doc.core_properties.author = state.get("author_name", "SENAI")
-        doc.core_properties.subject = state["theme"]
-        doc.core_properties.keywords = state.get("area_tecnologica", "")
-        doc.core_properties.comments = f"Público-alvo: {state.get('target_audience', 'Não especificado')}"
+        doc.core_properties.title = truncate_prop(state["title"])
+        doc.core_properties.author = truncate_prop(state.get("author_name", "SENAI"))
+        doc.core_properties.subject = truncate_prop(state.get("theme", ""))
+        doc.core_properties.keywords = truncate_prop(state.get("area_tecnologica", ""))
+        doc.core_properties.comments = truncate_prop(f"Público-alvo: {state.get('target_audience', 'Não especificado')}")
         logger.info("Propriedades do documento atualizadas")
     except Exception as e:
         logger.warning(f"Não foi possível atualizar propriedades do documento: {e}")
@@ -747,7 +753,54 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
             else:
                 run.text = part
     
-    # 4. Encontrar placeholder {{CONTEUDO}} e substituir
+    # 4. Processar placeholder {{INTRODUCAO}} - Título, Tema e Público-Alvo
+    for i, para in enumerate(doc.paragraphs):
+        if "{{INTRODUCAO}}" in para.text:
+            logger.info(f"Placeholder {{INTRODUCAO}} encontrado no parágrafo {i}")
+            # Limpar o parágrafo
+            para.clear()
+            
+            # Inserir título
+            current_para = para._element
+            new_para_elem = OxmlElement('w:p')
+            current_para.addnext(new_para_elem)
+            title_para = doc.paragraphs[i + 1]
+            try:
+                title_para.style = 'Title'
+            except KeyError:
+                try:
+                    title_para.style = 'Heading 1'
+                except KeyError:
+                    title_para.style = 'Normal'
+            title_para.add_run(state["title"])
+            
+            # Inserir área tecnológica
+            new_para_elem2 = OxmlElement('w:p')
+            title_para._element.addnext(new_para_elem2)
+            area_para = doc.paragraphs[i + 2]
+            area_para.style = 'Normal'
+            run = area_para.add_run(f"Área Tecnológica: {state.get('area_tecnologica', 'Não especificada')}")
+            run.bold = True
+            
+            # Inserir tema
+            new_para_elem3 = OxmlElement('w:p')
+            area_para._element.addnext(new_para_elem3)
+            theme_para = doc.paragraphs[i + 3]
+            theme_para.style = 'Normal'
+            run = theme_para.add_run(f"Tema: {state.get('theme', 'Não especificado')}")
+            run.italic = True
+            
+            # Inserir público-alvo
+            new_para_elem4 = OxmlElement('w:p')
+            theme_para._element.addnext(new_para_elem4)
+            audience_para = doc.paragraphs[i + 4]
+            audience_para.style = 'Normal'
+            run = audience_para.add_run(f"Público-Alvo: {state.get('target_audience', 'Não especificado')}")
+            
+            logger.info("Placeholder {{INTRODUCAO}} processado com sucesso")
+            break
+    
+    # 5. Processar placeholder {{CONTEUDO}} - Capítulos
     placeholder_found = False
     placeholder_index = -1
     
@@ -755,7 +808,7 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
         if "{{CONTEUDO}}" in para.text:
             placeholder_found = True
             placeholder_index = i
-            logger.info(f"Placeholder encontrado no parágrafo {i}")
+            logger.info(f"Placeholder {{CONTEUDO}} encontrado no parágrafo {i}")
             break
     
     if not placeholder_found:
@@ -765,7 +818,7 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
         # Limpar o parágrafo do placeholder
         doc.paragraphs[placeholder_index].clear()
     
-    # 5. Inserir conteúdo dos capítulos
+    # Inserir conteúdo dos capítulos
     current_idx = placeholder_index
     
     for chapter_num, chapter_data in sorted(state["chapters"].items()):
@@ -784,8 +837,30 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
         
         # Processar conteúdo do capítulo
         if chapter_data.get("content"):
+            content = chapter_data["content"]
+            
+            # Remover título duplicado se existir no conteúdo
+            # O LLM às vezes gera o título no início do conteúdo
+            lines = content.split('\n')
+            if lines:
+                first_line = lines[0].strip()
+                # Verificar se a primeira linha é o título do capítulo (em formato Markdown ou texto)
+                chapter_title = chapter_data.get('title', '')
+                is_duplicate_title = (
+                    first_line.startswith(f"# Capítulo {chapter_num}") or
+                    first_line.startswith(f"## Capítulo {chapter_num}") or
+                    first_line.startswith(f"### Capítulo {chapter_num}") or
+                    first_line.startswith(f"Capítulo {chapter_num}:") or
+                    first_line.startswith(f"**Capítulo {chapter_num}") or
+                    (chapter_title and chapter_title.lower() in first_line.lower() and len(first_line) < 150)
+                )
+                if is_duplicate_title:
+                    # Remover a primeira linha (título duplicado)
+                    content = '\n'.join(lines[1:]).lstrip()
+                    logger.info(f"Título duplicado removido do capítulo {chapter_num}")
+            
             current_idx = process_markdown_with_template_styles(
-                chapter_data["content"], 
+                content, 
                 doc, 
                 current_idx
             )
@@ -798,31 +873,27 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
             current_idx += 1
             doc.paragraphs[current_idx].add_run().add_break(docx.enum.text.WD_BREAK.PAGE)
     
-    # 6. Adicionar feedback se existir
-    if state.get("feedback"):
-        current_para = doc.paragraphs[current_idx]._element
-        new_para_elem = OxmlElement('w:p')
-        current_para.addnext(new_para_elem)
-        current_idx += 1
-        doc.paragraphs[current_idx].add_run().add_break(docx.enum.text.WD_BREAK.PAGE)
-        
-        current_para = doc.paragraphs[current_idx]._element
-        new_para_elem = OxmlElement('w:p')
-        current_para.addnext(new_para_elem)
-        current_idx += 1
-        
-        feedback_para = doc.paragraphs[current_idx]
-        try:
-            feedback_para.style = 'Heading 1'
-        except KeyError:
-            feedback_para.style = 'Normal'
-        feedback_para.add_run("Feedback da Revisão")
-        
-        current_idx = process_markdown_with_template_styles(
-            state["feedback"], 
-            doc, 
-            current_idx
-        )
+    # 6. Processar placeholder {{FEEDBACK}} - Revisão Técnica
+    for i, para in enumerate(doc.paragraphs):
+        if "{{FEEDBACK}}" in para.text:
+            logger.info(f"Placeholder {{FEEDBACK}} encontrado no parágrafo {i}")
+            # Limpar o parágrafo
+            para.clear()
+            
+            if state.get("feedback"):
+                # Inserir conteúdo do feedback
+                feedback_idx = i
+                feedback_idx = process_markdown_with_template_styles(
+                    state["feedback"], 
+                    doc, 
+                    feedback_idx
+                )
+                logger.info("Placeholder {{FEEDBACK}} processado com sucesso")
+            else:
+                # Se não houver feedback, inserir mensagem padrão
+                para.add_run("Nenhum feedback disponível para esta apostila.")
+                logger.info("Placeholder {{FEEDBACK}} - sem feedback disponível")
+            break
     
     # 7. Remover parágrafos de exemplo do template (após o placeholder)
     # Os parágrafos de exemplo ficam após onde era o placeholder
@@ -831,8 +902,9 @@ def export_book_from_template(state: BookState) -> Dict[str, Any]:
     # 8. Marcar campos (TOC) para atualização automática ao abrir
     # Isso faz o Word perguntar "Deseja atualizar os campos?" ao abrir
     try:
-        from docx.oxml.ns import qn
-        from docx.oxml import OxmlElement
+        # Imports já feitos no topo do arquivo
+        # from docx.oxml.ns import qn
+        # from docx.oxml import OxmlElement
         
         # Acessar settings.xml do documento
         settings = doc.settings.element
